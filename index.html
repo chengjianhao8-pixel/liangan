@@ -11,13 +11,14 @@
   .container { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
   .panel { background: #fff; padding: 20px; border-radius: 12px;
            box-shadow: 0 2px 12px rgba(20,40,80,0.08); }
-  .inputs { width: 380px; flex: 0 0 auto; }
+  .inputs { width: 400px; flex: 0 0 auto; }
   .canvas-wrap { flex: 1 1 520px; min-width: 400px; }
   .row { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
   .row label { flex: 0 0 140px; font-size: 14px; color: #444; }
   .row input, .row select { flex: 1; padding: 7px 10px; border: 1px solid #ccd3dd;
                border-radius: 6px; font-size: 14px; background: #fff; }
   .row input:focus, .row select:focus { outline: none; border-color: #4f8cff; }
+  .row .unit { flex: 0 0 auto; font-size: 12px; color: #7a8699; }
   button { padding: 9px 18px; margin: 8px 6px 0 0; background: #4f8cff;
            color: #fff; border: none; border-radius: 6px; cursor: pointer;
            font-size: 14px; transition: background 0.15s; }
@@ -29,7 +30,7 @@
   .toolbar { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
   canvas { display: block; background: #fbfcfd; border: 1px solid #e3e8ef;
            border-radius: 10px; width: 100%; height: auto; cursor: grab; }
-  #graph { cursor: default; margin-top: 12px; }
+  #graph, #torque { cursor: default; margin-top: 12px; }
   canvas.grabbing { cursor: grabbing; }
   .slider-bar { margin-top: 12px; padding: 14px 16px; background: #f6f9ff;
                 border-radius: 10px; border: 1px solid #e3ebf9; }
@@ -69,11 +70,7 @@
             font-size: 12px; color: #2c3e50; }
   .metric b { color: #1a2942; }
   .metric.highlight { background: #e8f5e9; }
-  /* 新增：小知识侧边栏卡片样式 */
-  .knowledge-card { background: #fdfdfd; border: 1px solid #dce4f0; border-radius: 8px; padding: 12px; margin-top: 16px; font-size: 12px; color: #333; line-height: 1.6; }
-  .knowledge-card h4 { margin: 0 0 8px 0; font-size: 14px; color: #1a2942; border-bottom: 2px solid #4f8cff; padding-bottom: 4px; }
-  .knowledge-card p { margin: 6px 0; }
-  .knowledge-card ul { padding-left: 16px; margin: 4px 0; }
+  .metric.torque { background: #fff3e0; }
 </style>
 </head>
 <body>
@@ -108,27 +105,16 @@
     <div class="target-info" id="targetInfo">
       选择目标类型后，程序会优先筛选匹配该类型的整数解。
     </div>
+    <div class="row">
+      <label>⚙️ 输入扭矩 T_in</label>
+      <input type="number" id="Tin" value="1" step="0.1" min="0.001">
+      <span class="unit">N·m</span>
+    </div>
+    <div class="hint">假定曲柄上作用恒定扭矩，用于反算摇杆输出扭矩。</div>
     <button id="btnSolve">求解 &amp; 检查</button>
     <button id="btnAnim" disabled>▶ 开始模拟</button>
     <button id="btnReset">重置</button>
     <div class="info" id="info"></div>
-
-    <!-- 新增：连杆机构设计小知识专栏 -->
-    <div class="knowledge-card">
-      <h4>💡 连杆机构设计小知识</h4>
-      <p><b>1. 格拉肖夫条件 (Grashof Condition)：</b><br>
-      设四杆机构最短杆为 s，最长杆为 l，其余两杆为 p, q。若满足 <b>s + l &lt p + q</b>，则机构中至少有一个杆能作整周旋转。</p>
-      <p><b>2. 机构类型判定：</b></p>
-      <ul>
-        <li><b>曲柄摇杆机构：</b>满足格拉肖夫条件，且最短杆的<b>相邻杆</b>（曲柄或摇杆）作机架。通常将曲柄作为主动件。</li>
-        <li><b>双曲柄机构：</b>满足格拉肖夫条件，且<b>最短杆为机架</b>。所有活动杆均能整周旋转（如风车、雷达转台）。</li>
-        <li><b>双摇杆机构：</b><b>不满足</b>格拉肖夫条件，或者满足条件但<b>最短杆为连杆</b>。此时没有任何杆能整周旋转，所有活动杆均只能作往复摆动。</li>
-      </ul>
-      <p><b>3. 设计要点：</b><br>
-      • <b>急回特性 (K)：</b>利用极位夹角可实现工作行程速度较慢、回程快速的急回运动。<br>
-      • <b>压力角与死点：</b>设计时应避免传动角过小（或压力角过大），防止机构卡死或自锁；同时可通过惯性或布置多个机构跨越“死点”位置。</p>
-    </div>
-
   </div>
   <div class="panel canvas-wrap">
     <div class="toolbar">
@@ -161,6 +147,7 @@
     </div>
 
     <canvas id="graph" width="760" height="240"></canvas>
+    <canvas id="torque" width="760" height="220"></canvas>
     <div class="metric-row" id="metrics"></div>
   </div>
 </div>
@@ -255,8 +242,7 @@ function findStartPhiAndDir(a, b, c, d) {
 function findNearestValidPhi(targetPhi, a, b, c, d) {
   let target = ((targetPhi % TWO_PI) + TWO_PI) % TWO_PI;
   const N = 7200;
-  let bestPhi = null;
-  let bestDiff = Infinity;
+  let bestPhi = null, bestDiff = Infinity;
   for (let i = 0; i < N; i++) {
     const phi = i * TWO_PI / N;
     if (!isValidPhi(phi, a, b, c, d)) continue;
@@ -328,102 +314,52 @@ function computeSwingCurve(a, b, c, d) {
   return curve.length >= 3 ? curve : null;
 }
 
-// ============================================================
-//  ★ 把曲线展开为一个或多个完整循环（用于"无限循环"图表）★
-// ============================================================
+// 展开成循环曲线
 function buildExtendedCurve(curve, canRotateFull) {
   if (!curve || curve.length < 2) return null;
-
   const phiMin = curve[0].phi;
   const phiMax = curve[curve.length - 1].phi;
   const range = phiMax - phiMin;
 
-  // -------- 整周旋转 --------
   if (canRotateFull && range > 0.9 * TWO_PI) {
     const basePhi = curve[0].phi;
     const data = [];
     for (let rep = 0; rep < 2; rep++) {
       for (const p of curve) {
-        const relPhi = p.phi - basePhi;
-        data.push({
-          s: rep * TWO_PI + relPhi,
-          phi: p.phi,
-          omega: p.omega
-        });
+        data.push({ s: rep * TWO_PI + (p.phi - basePhi), phi: p.phi, omega: p.omega });
       }
-      data.push({
-        s: (rep + 1) * TWO_PI,
-        phi: basePhi,
-        omega: curve[0].omega
-      });
+      data.push({ s: (rep + 1) * TWO_PI, phi: basePhi, omega: curve[0].omega });
     }
-    return {
-      data,
-      sMin: 0,
-      sMax: 2 * TWO_PI,
-      period: TWO_PI,
-      full: true,
-      phiMin: basePhi,
-      phiMax: basePhi + TWO_PI
-    };
+    return { data, sMin: 0, sMax: 2 * TWO_PI, period: TWO_PI, full: true,
+             phiMin: basePhi, phiMax: basePhi + TWO_PI };
   }
 
-  // -------- 受限机构：把往返展开 --------
   const L = range;
   if (L < 1e-6) return null;
-
   const data = [];
-
-  // 第 1 个循环 · 正向路径
-  for (const p of curve) {
-    data.push({ s: p.phi - phiMin, phi: p.phi, omega: p.omega });
-  }
-  // 第 1 个循环 · 反向路径（跳过两个端点，避免重复）
+  for (const p of curve) data.push({ s: p.phi - phiMin, phi: p.phi, omega: p.omega });
   for (let i = curve.length - 2; i >= 0; i--) {
     const p = curve[i];
-    data.push({
-      s: L + (phiMax - p.phi),
-      phi: p.phi,
-      omega: -p.omega
-    });
+    data.push({ s: L + (phiMax - p.phi), phi: p.phi, omega: -p.omega });
   }
-
-  // 复制出第 2 个循环
   const cycleLen = data.length;
   for (let i = 0; i < cycleLen; i++) {
     const p = data[i];
     data.push({ s: p.s + 2 * L, phi: p.phi, omega: p.omega });
   }
-
-  return {
-    data,
-    sMin: 0,
-    sMax: 4 * L,
-    period: 2 * L,
-    full: false,
-    phiMin,
-    phiMax,
-    L
-  };
+  return { data, sMin: 0, sMax: 4 * L, period: 2 * L, full: false,
+           phiMin, phiMax, L };
 }
 
 function sToPhi(s, ext) {
-  if (ext.full) {
-    return ((s % TWO_PI) + TWO_PI) % TWO_PI;
-  }
+  if (ext.full) return ((s % TWO_PI) + TWO_PI) % TWO_PI;
   const cycleLen = 2 * ext.L;
   const cyclePos = ((s % cycleLen) + cycleLen) % cycleLen;
-  if (cyclePos < ext.L) {
-    return ext.phiMin + cyclePos;
-  } else {
-    return ext.phiMax - (cyclePos - ext.L);
-  }
+  return cyclePos < ext.L ? ext.phiMin + cyclePos : ext.phiMax - (cyclePos - ext.L);
 }
 
 function phiToS(phi, dir, ext) {
-  if (ext.full) {
-    return ((phi % TWO_PI) + TWO_PI) % TWO_PI;
-  }
+  if (ext.full) return ((phi % TWO_PI) + TWO_PI) % TWO_PI;
   let p = phi;
   if (p < ext.phiMin) p = ext.phiMin;
   if (p > ext.phiMax) p = ext.phiMax;
@@ -487,6 +423,32 @@ function interpolateOmega(curve, phi) {
     }
   }
   return null;
+}
+
+// ============================================================
+//  ★ 扭矩曲线 ★
+//    T_out(φ) = T_in / |ω(φ)|
+// ============================================================
+function computeTorqueCurve(ext, Tin) {
+  if (!ext || !ext.data || ext.data.length === 0) return;
+  let maxAbsOmega = 0;
+  for (const p of ext.data) {
+    const a = Math.abs(p.omega);
+    if (a > maxAbsOmega) maxAbsOmega = a;
+  }
+  const omegaFloor = Math.max(maxAbsOmega * 0.008, 1e-6);
+  for (const p of ext.data) {
+    const a = Math.abs(p.omega);
+    if (a < omegaFloor) {
+      p.torque = Tin / omegaFloor;
+      p.torqueClamped = true;
+    } else {
+      p.torque = Tin / a;
+      p.torqueClamped = false;
+    }
+  }
+  ext.Tin = Tin;
+  ext.omegaFloor = omegaFloor;
 }
 
 // ============================================================
@@ -604,7 +566,7 @@ function solveFourBar(th1deg, th2deg, vals) {
 }
 
 // ============================================================
-//  格拉肖夫条件逻辑
+//  格拉肖夫条件
 // ============================================================
 function grashofCheck(a, b, c, d) {
   const labeled = [
@@ -677,6 +639,8 @@ const cv = $('cv');
 const ctx = cv.getContext('2d');
 const gcv = $('graph');
 const gctx = gcv.getContext('2d');
+const tcv = $('torque');
+const tctx = tcv.getContext('2d');
 
 let currentSolution = null;
 let currentCurve = null;
@@ -767,12 +731,17 @@ $('mechType').addEventListener('change', () => {
   if (lastInputs) solveAndRender();
 });
 
-// ============================================================
-//  滑块
-// ============================================================
 $('speedSlider').addEventListener('input', (e) => {
   animState.speed = parseFloat(e.target.value);
   $('speedVal').textContent = animState.speed.toFixed(2) + ' rad/s';
+});
+
+$('Tin').addEventListener('input', () => {
+  if (!currentExt) return;
+  const Tin = parseFloat($('Tin').value) || 1;
+  computeTorqueCurve(currentExt, Tin);
+  drawTorqueGraph();
+  updateMetrics();
 });
 
 let userDraggingCrank = false;
@@ -799,22 +768,25 @@ function setCrankPhi(deg) {
   syncCrankSlider();
   drawFrame();
   drawGraph();
+  drawTorqueGraph();
 }
 
 function syncCrankSlider() {
   const deg = ((toDeg(animState.phi) % 360) + 360) % 360;
-  $('crankSlider').value = deg.toFixed(1);$('crankVal').textContent = deg.toFixed(1) + '°';
+  $('crankSlider').value = deg.toFixed(1);
+  $('crankVal').textContent = deg.toFixed(1) + '°';
 }
 
 $('crankSlider').addEventListener('input', (e) => {
   setCrankPhi(parseFloat(e.target.value));
 });
-$('crankSlider').addEventListener('mousedown', () => { userDraggingCrank = true; });$('crankSlider').addEventListener('touchstart', () => { userDraggingCrank = true; }, { passive: true });
+$('crankSlider').addEventListener('mousedown', () => { userDraggingCrank = true; });
+$('crankSlider').addEventListener('touchstart', () => { userDraggingCrank = true; }, { passive: true });
 window.addEventListener('mouseup', () => { userDraggingCrank = false; });
 window.addEventListener('touchend', () => { userDraggingCrank = false; });
 
 // ============================================================
-//  求解
+//  求解 & 渲染
 // ============================================================
 function solveAndRender() {
   try {
@@ -931,6 +903,11 @@ function solveAndRender() {
     else animState.phi = 0;
 
     currentExt = buildExtendedCurve(currentCurve, animState.canRotateFull);
+
+    // 计算扭矩曲线
+    const Tin = parseFloat($('Tin').value) || 1;
+    computeTorqueCurve(currentExt, Tin);
+
     updateMetrics();
 
     view.zoom = 1; view.panX = 0; view.panY = 0;
@@ -954,6 +931,7 @@ function solveAndRender() {
 
     drawFrame();
     drawGraph();
+    drawTorqueGraph();
 
   } catch (e) {
     $('info').innerHTML = `<div class="bad">错误：${e.message}</div>`;
@@ -977,11 +955,17 @@ function updateMetrics() {
     const highlight = currentQuickReturn.K > 1.3 ? 'highlight' : '';
     html += `<div class="metric ${highlight}">急回比 <b>K = ${kStr}</b> (${arcsDeg})</div>`;
   }
+  // 扭矩峰值
+  if (currentExt && currentExt.Tin && currentExt.data) {
+    let tMax = 0;
+    for (const p of currentExt.data) if (p.torque > tMax) tMax = p.torque;
+    html += `<div class="metric torque">摇杆最大输出扭矩 ≈ <b>${tMax.toFixed(3)}</b> N·m</div>`;
+  }
   el.innerHTML = html;
 }
 
 // ============================================================
-//  绘制图表
+//  绘制速度图
 // ============================================================
 function drawGraph() {
   const W = gcv.width, H = gcv.height;
@@ -1003,7 +987,6 @@ function drawGraph() {
 
   const ext = currentExt;
   const data = ext.data;
-
   const pad = { left: 68, right: 24, top: 34, bottom: 42 };
   const plotW = W - pad.left - pad.right;
   const plotH = H - pad.top - pad.bottom;
@@ -1026,9 +1009,8 @@ function drawGraph() {
 
   gctx.strokeStyle = '#eaeef5';
   gctx.lineWidth = 1;
-  const xGridCount = ext.full ? 8 : 8;
-  for (let i = 0; i <= xGridCount; i++) {
-    const x = pad.left + i * plotW / xGridCount;
+  for (let i = 0; i <= 8; i++) {
+    const x = pad.left + i * plotW / 8;
     gctx.beginPath(); gctx.moveTo(x, pad.top); gctx.lineTo(x, pad.top + plotH); gctx.stroke();
   }
   for (let i = 0; i <= 4; i++) {
@@ -1125,20 +1107,14 @@ function drawGraph() {
   gctx.fillStyle = '#5a677b';
   gctx.font = '12px sans-serif';
   gctx.textAlign = 'center';
-  const nTicks = 8;
-  for (let i = 0; i <= nTicks; i++) {
-    const s = sMin + i * (sMax - sMin) / nTicks;
+  for (let i = 0; i <= 8; i++) {
+    const s = sMin + i * (sMax - sMin) / 8;
     const x = toX(s);
-    let label;
-    if (ext.full) {
-      label = toDeg(s).toFixed(0) + '°';
-    } else {
-      const phi = sToPhi(s, ext);
-      label = toDeg(phi).toFixed(0) + '°';
-    }
+    const label = ext.full
+      ? toDeg(s).toFixed(0) + '°'
+      : toDeg(sToPhi(s, ext)).toFixed(0) + '°';
     gctx.fillText(label, x, pad.top + plotH + 18);
   }
-
   gctx.textAlign = 'right';
   for (let i = 0; i <= 4; i++) {
     const omega = yMax - i * (yMax - yMin) / 4;
@@ -1148,7 +1124,7 @@ function drawGraph() {
   gctx.textAlign = 'center';
   gctx.font = 'bold 12px sans-serif';
   gctx.fillStyle = '#2c3e50';
-  gctx.fillText('曲柄角度 φ (°)', pad.left + plotW/2, H - 8);
+  gctx.fillText('曲柄角 φ (°)', pad.left + plotW/2, H - 8);
 
   gctx.save();
   gctx.translate(16, pad.top + plotH/2);
@@ -1163,11 +1139,8 @@ function drawGraph() {
   gctx.font = '11px sans-serif';
   gctx.fillStyle = '#7a8699';
   let subtitle;
-  if (ext.full) {
-    subtitle = '（完整周期 × 2，假设曲柄匀速 1 rad/s）';
-  } else {
-    subtitle = `（正向 → 反向 → 正向，共 2 个循环，摆动范围 ${toDeg(ext.L).toFixed(1)}°）`;
-  }
+  if (ext.full) subtitle = '（完整周期 × 2，假设曲柄匀速 1 rad/s）';
+  else subtitle = `（正向 → 反向 → 正向，共 2 个循环，摆动范围 ${toDeg(ext.L).toFixed(1)}°）`;
   gctx.fillText(subtitle, pad.left + 240, 20);
 
   const curPhi = animState.phi;
@@ -1189,7 +1162,6 @@ function drawGraph() {
       gctx.fillStyle = '#ff6b6b';
       gctx.beginPath(); gctx.arc(x, y, 5, 0, TWO_PI); gctx.fill();
       gctx.strokeStyle = '#fff'; gctx.lineWidth = 2; gctx.stroke();
-
       gctx.fillStyle = '#c62828';
       gctx.font = 'bold 11px sans-serif';
       gctx.textAlign = 'center';
@@ -1211,7 +1183,185 @@ function drawGraph() {
 }
 
 // ============================================================
-//  按钮事件
+//  绘制扭矩图
+// ============================================================
+function drawTorqueGraph() {
+  const W = tcv.width, H = tcv.height;
+  tctx.clearRect(0, 0, W, H);
+  tctx.fillStyle = '#fbfcfd';
+  tctx.fillRect(0, 0, W, H);
+  tctx.strokeStyle = '#e3e8ef';
+  tctx.lineWidth = 1;
+  tctx.strokeRect(0.5, 0.5, W-1, H-1);
+
+  const ext = currentExt;
+  if (!ext || !ext.data || ext.data.length < 2 || !ext.Tin) {
+    tctx.fillStyle = '#9aa8bb';
+    tctx.font = '14px sans-serif';
+    tctx.textAlign = 'center';
+    tctx.fillText('求解后，此处显示摇杆输出扭矩曲线', W/2, H/2);
+    tctx.textAlign = 'left';
+    return;
+  }
+
+  const data = ext.data;
+  const pad = { left: 68, right: 24, top: 30, bottom: 42 };
+  const plotW = W - pad.left - pad.right;
+  const plotH = H - pad.top - pad.bottom;
+
+  let tMax = 0;
+  for (const p of data) if (p.torque > tMax) tMax = p.torque;
+  tMax = Math.max(tMax, 1e-6);
+  const tDisplayMax = tMax * 1.12;
+
+  const sMin = ext.sMin, sMax = ext.sMax;
+  const toX = s => pad.left + (s - sMin) / (sMax - sMin || 1) * plotW;
+  const toY = t => pad.top + (tDisplayMax - t) / tDisplayMax * plotH;
+
+  tctx.strokeStyle = '#eaeef5';
+  tctx.lineWidth = 1;
+  for (let i = 0; i <= 8; i++) {
+    const x = pad.left + i * plotW / 8;
+    tctx.beginPath(); tctx.moveTo(x, pad.top); tctx.lineTo(x, pad.top + plotH); tctx.stroke();
+  }
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.top + i * plotH / 4;
+    tctx.beginPath(); tctx.moveTo(pad.left, y); tctx.lineTo(pad.left + plotW, y); tctx.stroke();
+  }
+
+  if (!ext.full) {
+    tctx.strokeStyle = 'rgba(120,150,190,0.4)';
+    tctx.setLineDash([4, 3]);
+    tctx.lineWidth = 1;
+    for (let k = 1; k <= 3; k++) {
+      const s = ext.L * k;
+      if (s <= sMin || s >= sMax) continue;
+      const x = toX(s);
+      tctx.beginPath(); tctx.moveTo(x, pad.top); tctx.lineTo(x, pad.top + plotH); tctx.stroke();
+    }
+    tctx.setLineDash([]);
+  }
+
+  tctx.save();
+  tctx.beginPath();
+  tctx.rect(pad.left, pad.top, plotW, plotH);
+  tctx.clip();
+  tctx.beginPath();
+  tctx.moveTo(toX(data[0].s), toY(0));
+  for (const p of data) tctx.lineTo(toX(p.s), toY(p.torque));
+  tctx.lineTo(toX(data[data.length - 1].s), toY(0));
+  tctx.closePath();
+  const grad = tctx.createLinearGradient(0, pad.top, 0, pad.top + plotH);
+  grad.addColorStop(0, 'rgba(255,152,0,0.35)');
+  grad.addColorStop(1, 'rgba(255,152,0,0.05)');
+  tctx.fillStyle = grad;
+  tctx.fill();
+  tctx.restore();
+
+  tctx.strokeStyle = '#ff9800';
+  tctx.lineWidth = 2.2;
+  tctx.lineJoin = 'round';
+  tctx.beginPath();
+  for (let i = 0; i < data.length; i++) {
+    const p = data[i];
+    if (i === 0) tctx.moveTo(toX(p.s), toY(p.torque));
+    else tctx.lineTo(toX(p.s), toY(p.torque));
+  }
+  tctx.stroke();
+
+  for (const p of data) {
+    if (p.torqueClamped) {
+      const x = toX(p.s);
+      tctx.fillStyle = 'rgba(198,40,40,0.6)';
+      tctx.beginPath();
+      tctx.arc(x, toY(p.torque), 2.5, 0, TWO_PI);
+      tctx.fill();
+    }
+  }
+
+  tctx.strokeStyle = '#5a677b';
+  tctx.lineWidth = 1.5;
+  tctx.beginPath();
+  tctx.moveTo(pad.left, pad.top);
+  tctx.lineTo(pad.left, pad.top + plotH);
+  tctx.lineTo(pad.left + plotW, pad.top + plotH);
+  tctx.stroke();
+
+  tctx.fillStyle = '#5a677b';
+  tctx.font = '12px sans-serif';
+  tctx.textAlign = 'center';
+  for (let i = 0; i <= 8; i++) {
+    const s = sMin + i * (sMax - sMin) / 8;
+    const x = toX(s);
+    const label = ext.full
+      ? toDeg(s).toFixed(0) + '°'
+      : toDeg(sToPhi(s, ext)).toFixed(0) + '°';
+    tctx.fillText(label, x, pad.top + plotH + 18);
+  }
+
+  tctx.textAlign = 'right';
+  for (let i = 0; i <= 4; i++) {
+    const t = tDisplayMax - i * tDisplayMax / 4;
+    tctx.fillText(t.toFixed(2), pad.left - 8, pad.top + i * plotH / 4 + 4);
+  }
+
+  tctx.textAlign = 'center';
+  tctx.font = 'bold 12px sans-serif';
+  tctx.fillStyle = '#2c3e50';
+  tctx.fillText('曲柄角度 φ (°)', pad.left + plotW / 2, H - 8);
+
+  tctx.save();
+  tctx.translate(16, pad.top + plotH / 2);
+  tctx.rotate(-Math.PI / 2);
+  tctx.fillText('摇杆输出扭矩 (N·m)', 0, 0);
+  tctx.restore();
+
+  tctx.textAlign = 'left';
+  tctx.font = 'bold 13px sans-serif';
+  tctx.fillStyle = '#2c3e50';
+  tctx.fillText('摇杆输出扭矩 vs 曲柄转角', pad.left, 18);
+  tctx.font = '11px sans-serif';
+  tctx.fillStyle = '#7a8699';
+  tctx.fillText(`（T_in = ${ext.Tin} N·m，准静态无摩擦）`, pad.left + 180, 18);
+
+  const curS = phiToS(animState.phi, animState.dir, ext);
+  if (curS >= sMin && curS <= sMax) {
+    const x = toX(curS);
+    tctx.strokeStyle = 'rgba(255,107,107,0.85)';
+    tctx.lineWidth = 1.8;
+    tctx.setLineDash([5, 4]);
+    tctx.beginPath();
+    tctx.moveTo(x, pad.top);
+    tctx.lineTo(x, pad.top + plotH);
+    tctx.stroke();
+    tctx.setLineDash([]);
+
+    let curT = null;
+    for (let i = 0; i < data.length - 1; i++) {
+      if (data[i].s <= curS && curS <= data[i + 1].s) {
+        const denom = data[i + 1].s - data[i].s;
+        if (denom < 1e-12) { curT = data[i].torque; break; }
+        const tt = (curS - data[i].s) / denom;
+        curT = data[i].torque + tt * (data[i + 1].torque - data[i].torque);
+        break;
+      }
+    }
+    if (curT !== null) {
+      const y = toY(curT);
+      tctx.fillStyle = '#ff9800';
+      tctx.beginPath(); tctx.arc(x, y, 5, 0, TWO_PI); tctx.fill();
+      tctx.strokeStyle = '#fff'; tctx.lineWidth = 2; tctx.stroke();
+      tctx.fillStyle = '#e65100';
+      tctx.font = 'bold 11px sans-serif';
+      tctx.textAlign = 'center';
+      tctx.fillText(curT.toFixed(3), x, y - 10);
+      tctx.textAlign = 'left';
+    }
+  }
+}
+
+// ============================================================
+//  按钮
 // ============================================================
 $('btnSolve').addEventListener('click', solveAndRender);
 
@@ -1238,9 +1388,13 @@ $('btnReset').addEventListener('click', () => {
     syncCrankSlider();
     resetView();
     drawGraph();
+    drawTorqueGraph();
   }
 });
 
+// ============================================================
+//  动画
+// ============================================================
 function animate(t) {
   if (!animState.running) return;
   const dt = Math.min((t - animState.lastT) / 1000, 0.1);
@@ -1264,9 +1418,13 @@ function animate(t) {
 
   drawFrame();
   drawGraph();
+  drawTorqueGraph();
   requestAnimationFrame(animate);
 }
 
+// ============================================================
+//  主画布绘制
+// ============================================================
 function computeTransform(a, b, c, d, W, H) {
   const xs = [], ys = [];
   const addPt = (x, y) => { xs.push(x); ys.push(y); };
@@ -1374,10 +1532,30 @@ function drawFrame() {
     ctx.fillText(`摇杆角速度 ω = ${curOmega.toFixed(3)} rad/s`, 16, 74);
   }
 
+  // 当前扭矩显示
+  if (currentExt) {
+    const s = phiToS(phi, animState.dir, currentExt);
+    const data = currentExt.data;
+    let curT = null;
+    for (let i = 0; i < data.length - 1; i++) {
+      if (data[i].s <= s && s <= data[i + 1].s) {
+        const denom = data[i + 1].s - data[i].s;
+        if (denom < 1e-12) { curT = data[i].torque; break; }
+        const tt = (s - data[i].s) / denom;
+        curT = data[i].torque + tt * (data[i + 1].torque - data[i].torque);
+        break;
+      }
+    }
+    if (curT !== null) {
+      ctx.fillStyle = '#e65100';
+      ctx.fillText(`摇杆输出扭矩 = ${curT.toFixed(3)} N·m`, 16, 98);
+    }
+  }
+
   const gr = grashofCheck(a, b, c, d);
   const mt = classifyMechanism(gr);
   ctx.fillStyle = '#2c4c8a'; ctx.font = 'bold 13px sans-serif';
-  ctx.fillText(`类型：${typeLabel(mt)}`, 16, 98);
+  ctx.fillText(`类型：${typeLabel(mt)}`, 16, 122);
 
   if (!animState.canRotateFull && animState.hasAnyValid) {
     ctx.fillStyle = '#ef6c00'; ctx.font = 'bold 13px sans-serif';
@@ -1395,6 +1573,9 @@ function drawFrame() {
   ctx.fillStyle = '#2c3e50'; ctx.fillText('机架 d', W - 108, 84);
 }
 
+// ============================================================
+//  初始化
+// ============================================================
 (function init() {
   animState.a = 3; animState.b = 1.57;
   animState.c = 6.43; animState.d = 5;
@@ -1405,6 +1586,7 @@ function drawFrame() {
   $('speedVal').textContent = animState.speed.toFixed(2) + ' rad/s';
   drawFrame();
   drawGraph();
+  drawTorqueGraph();
 })();
 </script>
 </body>
